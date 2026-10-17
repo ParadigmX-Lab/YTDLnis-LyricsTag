@@ -73,10 +73,24 @@ The library is installed into the project folder rather than into the YTDLnis pa
 
 **3. Add a command template in YTDLnis**
 
-In YTDLnis open "More" - "Command templates" and tap "New template". Pick any title (for example, "Lyrics to tags") and paste this into the "Command" field:
+In YTDLnis open "More" - "Command templates" and tap "New template". Pick any title (for example, "Lyrics to tags") and paste one of the three templates below into the "Command" field. Choose by the description; you can switch to another one later by replacing the text.
+
+**Template 1. Lyrics only.** The simplest option: after a download, synchronized lyrics are written into the tags.
 
 ```
 -v --plugin-dirs "/sdcard/Documents/Scripts" --use-postprocessor "LyricsTag:when=after_move"
+```
+
+**Template 2. Lyrics and sorting into folders.** The same, plus the track is automatically moved into a folder named after the artist (see "Sorting into artist folders").
+
+```
+-v --plugin-dirs "/sdcard/Documents/Scripts" --use-postprocessor "LyricsTag:when=after_move;sort=1"
+```
+
+**Template 3. Lyrics, sorting and clean artist names.** The same, plus only the first artist is kept in the file name and the tag: it removes songwriters and producers that YouTube Music adds to `artist` separated by commas (for example, `Artist, Songwriter Name` becomes `Artist`). Downside: genuine collaborations (`A, B`) also become `A` (details in "Troubleshooting").
+
+```
+-v --plugin-dirs "/sdcard/Documents/Scripts" --parse-metadata "%(uploader)s:^(?P<uploader>.*?)(?:(?=,\s+)|$)" --parse-metadata "%(uploader)s:%(artist)s" --use-postprocessor "LyricsTag:when=after_move;sort=1"
 ```
 
 Below that, turn on the "Extra command" switch and tick "Audio" (leave "Video" unticked). Leave everything else as is and tap "Save" (when editing an existing template the button is called "Update"). From now on the command is added to every audio download.
