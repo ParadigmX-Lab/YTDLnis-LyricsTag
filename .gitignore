@@ -1,0 +1,6 @@
+# зависимости, ставятся пользователем командой pip install --target ...
+libs/
+
+# кэш Python
+__pycache__/
+*.pyc
