@@ -2,7 +2,7 @@
 
 [Русский](README.md) | **English**
 
-Documentation v1.1 (lyrics_tag.py v4, plugin lyrics_tag_pp.py v3)
+Documentation v1.2 (lyrics_tag.py v5, plugin lyrics_tag_pp.py v3)
 
 Automatically embeds **synchronized lyrics** (karaoke-style, line by line) into the tags of downloaded tracks. It runs entirely on Android, no PC needed: once YTDLnis has downloaded a track, the lyrics are already inside the file, and your player shows them as the song plays.
 
@@ -16,7 +16,7 @@ It works together with [YTDLnis](https://github.com/deniscerri/ytdlnis) (an Andr
 2. After the download, yt-dlp calls the LyricsTag plugin (an `after_move` postprocessor).
 3. The plugin runs `lyrics_tag.py` inside the yt-dlp process itself (no shell, no subprocess).
 4. The script fetches lyrics from:
-   - **YouTube Music** via the `ytmusicapi` library (the primary source; the videoId is taken from the `purl` tag, from an `[id]` in the file name, or from a search);
+   - **YouTube Music** via the `ytmusicapi` library (the primary source; the videoId is taken from the `purl` tag, from an `[id]` in the file name, or from a search, whose results are checked against the title and artist);
    - **LRCLIB** (the fallback, used only if YouTube Music has no synchronized lyrics or could not be queried).
 5. The lyrics are written into the file's tags.
 

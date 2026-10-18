@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-lyrics_tag.py (v4) - добавляет текст песни (синхронный или обычный) в теги mp3/opus/ogg/flac/m4a
+lyrics_tag.py (v5) - добавляет текст песни (синхронный или обычный) в теги mp3/opus/ogg/flac/m4a
 и (по желанию) раскладывает треки по папкам основного исполнителя.
 
 Источники по порядку:
@@ -36,6 +36,7 @@ from mutagen.id3 import ID3, ID3NoHeaderError, SYLT, USLT
 EXTS = {".mp3", ".opus", ".ogg", ".flac", ".m4a"}
 ID_RE = re.compile(r"(?:v=|youtu\.be/|/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])")
 NAME_ID_RE = re.compile(r"\[([A-Za-z0-9_-]{11})\]")
+UA = "LyricsTag/5 (https://github.com/ParadigmX-Lab/YTDLnis-LyricsTag)"  # LRCLIB просит указывать проект
 LRC_RE = re.compile(r"^\[(\d+):(\d+(?:\.\d+)?)\](.*)$")
 ARTIST_SPLIT_RE = re.compile(r"\s*(?:,|;|\sfeat\.?\s|\sft\.?\s|\sfeaturing\s)\s*", re.I)
 BAD_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -107,6 +108,24 @@ def parse_lrc(lrc):
     return out
 
 
+def _norm(s):
+    s = re.sub(r"[(\[].*?[)\]]", " ", s or "")  # убрать (feat. ...), [Remix] и т.п.
+    return re.sub(r"[\W_]+", "", s.casefold())
+
+
+def _same_track(info, r):
+    """Результат поиска YT Music должен совпасть по названию и (если известен) по исполнителю."""
+    t, rt = _norm(info["title"]), _norm(r.get("title"))
+    if not t or not rt or not (t == rt or (min(len(t), len(rt)) >= 4 and (t in rt or rt in t))):
+        return False
+    wanted = [_norm(a) for a in ARTIST_SPLIT_RE.split(info["artist"] or "") if _norm(a)]
+    if not wanted:
+        return True
+    have = [_norm(a.get("name")) for a in (r.get("artists") or []) if isinstance(a, dict)]
+    return any(w == h or (min(len(w), len(h)) >= 3 and (w in h or h in w))
+               for w in wanted for h in have)
+
+
 def from_ytmusic(info, log):
     try:
         from ytmusicapi import YTMusic
@@ -126,8 +145,14 @@ def from_ytmusic(info, log):
         for r in yt.search(q, filter="songs", limit=5):
             vid = r.get("videoId")
             d = r.get("duration_seconds")
-            if vid and vid not in ids and (d is None or abs(d - info["duration"]) <= 4):
-                ids.append(vid)
+            if not vid or vid in ids:
+                continue
+            if d is not None and abs(d - info["duration"]) > 4:
+                continue
+            if not _same_track(info, r):
+                log(f"  поиск: пропущен {vid} ({r.get('title')}) - не совпадает название/исполнитель")
+                continue
+            ids.append(vid)
     except Exception as e:  # noqa: BLE001
         log(f"  поиск YT Music не удался: {e}")
     plain_fallback = None
@@ -161,7 +186,7 @@ def from_lrclib(info, log):
     params = {"artist_name": info["artist"], "track_name": info["title"],
               "duration": int(round(info["duration"]))}
     url = "https://lrclib.net/api/get?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(url, headers={"User-Agent": "lyrics_tag.py (personal script)"})
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
     d = None
     for attempt in range(3):  # LRCLIB иногда отвечает 5xx, пробуем еще раз
         try:
@@ -175,7 +200,8 @@ def from_lrclib(info, log):
             log(f"  LRCLIB: {e} (попытка {attempt + 1}/3)")
         except Exception as e:  # noqa: BLE001
             log(f"  LRCLIB: {type(e).__name__}: {e} (попытка {attempt + 1}/3)")
-        time.sleep(2 * (attempt + 1))
+        if attempt < 2:
+            time.sleep(2 * (attempt + 1))
     if d is None:
         return None
     if d.get("instrumental"):
@@ -197,8 +223,9 @@ def from_lrclib(info, log):
 def to_lrc(lines):
     out = []
     for ms, text in lines:
-        m, s = divmod(ms / 1000.0, 60)
-        out.append(f"[{int(m):02d}:{s:05.2f}] {text}")
+        cs = int(round(ms / 10.0))  # сотые доли секунды; так не получится "59.996" -> "60.00"
+        m, rem = divmod(cs, 6000)
+        out.append(f"[{m:02d}:{rem // 100:02d}.{rem % 100:02d}] {text}")
     return "\n".join(out)
 
 
@@ -272,6 +299,8 @@ def sort_into_artist_dir(path, root, log):
         log("  сортировка: исполнитель не указан, пропуск")
         return path
     dest_dir = os.path.join(root, artist)
+    if os.path.basename(os.path.dirname(os.path.abspath(path))).casefold() == artist.casefold():
+        return path  # уже лежит в папке исполнителя (не создавать Исполнитель/Исполнитель)
     if os.path.abspath(os.path.dirname(path)) == os.path.abspath(dest_dir):
         return path
     dest = os.path.join(dest_dir, os.path.basename(path))
