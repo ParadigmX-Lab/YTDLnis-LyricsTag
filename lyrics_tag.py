@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-lyrics_tag.py (v5) - добавляет текст песни (синхронный или обычный) в теги mp3/opus/ogg/flac/m4a
+lyrics_tag.py (v6) - добавляет текст песни (синхронный или обычный) в теги mp3/opus/ogg/flac/m4a
 и (по желанию) раскладывает треки по папкам основного исполнителя.
 
 Источники по порядку:
-  1. YouTube Music (ytmusicapi), videoId берется из тега purl/comment, имени файла [id] или поиска
+  1. YouTube Music (ytmusicapi): сначала videoId из тега purl/comment или имени файла [id];
+     поиск выполняется только если по этому id нет синхронного текста (или id неизвестен)
   2. LRCLIB (только stdlib), по artist/title/duration
 
 Зависимости: pip install mutagen ytmusicapi
@@ -36,7 +37,7 @@ from mutagen.id3 import ID3, ID3NoHeaderError, SYLT, USLT
 EXTS = {".mp3", ".opus", ".ogg", ".flac", ".m4a"}
 ID_RE = re.compile(r"(?:v=|youtu\.be/|/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])")
 NAME_ID_RE = re.compile(r"\[([A-Za-z0-9_-]{11})\]")
-UA = "LyricsTag/5 (https://github.com/ParadigmX-Lab/YTDLnis-LyricsTag)"  # LRCLIB просит указывать проект
+UA = "LyricsTag/6 (https://github.com/ParadigmX-Lab/YTDLnis-LyricsTag)"  # LRCLIB просит указывать проект
 LRC_RE = re.compile(r"^\[(\d+):(\d+(?:\.\d+)?)\](.*)$")
 ARTIST_SPLIT_RE = re.compile(r"\s*(?:,|;|\sfeat\.?\s|\sft\.?\s|\sfeaturing\s)\s*", re.I)
 BAD_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -137,15 +138,62 @@ def from_ytmusic(info, log):
             log("  " + tb_line)
         return None
     yt = YTMusic()
-    ids = []
+    tried = set()
+    plain_fallback = None
+
+    def fetch(vid):
+        """(lines, plain) для одного videoId: lines=None - только обычный текст; None - текста нет."""
+        try:
+            browse_id = yt.get_watch_playlist(videoId=vid).get("lyrics")
+            if not browse_id:
+                return None
+            data = yt.get_lyrics(browse_id, timestamps=True)
+        except Exception as e:  # noqa: BLE001
+            log(f"  {vid}: ошибка {e}")
+            return None
+        if not data:
+            return None
+        if data.get("hasTimestamps"):
+            lines = []
+            for l in data["lyrics"]:
+                text = l["text"] if isinstance(l, dict) else l.text
+                start = l["start_time"] if isinstance(l, dict) else l.start_time
+                lines.append((int(start), text))
+            log(f"  YT Music: синхронный текст ({vid})")
+            return lines, "\n".join(t for _, t in lines)
+        if data.get("lyrics"):
+            return None, data["lyrics"]
+        return None
+
+    def try_ids(ids):
+        """Первый синхронный результат; обычный текст запоминается как запасной."""
+        nonlocal plain_fallback
+        for vid in ids:
+            if vid in tried:
+                continue
+            tried.add(vid)
+            res = fetch(vid)
+            if res is None:
+                continue
+            if res[0] is not None:
+                return res
+            if plain_fallback is None:
+                plain_fallback = res
+        return None
+
+    # 1. videoId из тегов/имени файла: если по нему есть синхронный текст, поиск не нужен
     if info["video_id"]:
-        ids.append(info["video_id"])
+        res = try_ids([info["video_id"]])
+        if res:
+            return res
+    # 2. поиск: только когда по известному id синхронного текста нет (или id неизвестен)
+    ids = []
     q = f'{info["artist"]} {info["title"]}'.strip()
     try:
         for r in yt.search(q, filter="songs", limit=5):
             vid = r.get("videoId")
             d = r.get("duration_seconds")
-            if not vid or vid in ids:
+            if not vid or vid in ids or vid == info["video_id"]:
                 continue
             if d is not None and abs(d - info["duration"]) > 4:
                 continue
@@ -155,28 +203,9 @@ def from_ytmusic(info, log):
             ids.append(vid)
     except Exception as e:  # noqa: BLE001
         log(f"  поиск YT Music не удался: {e}")
-    plain_fallback = None
-    for vid in ids:
-        try:
-            browse_id = yt.get_watch_playlist(videoId=vid).get("lyrics")
-            if not browse_id:
-                continue
-            data = yt.get_lyrics(browse_id, timestamps=True)
-        except Exception as e:  # noqa: BLE001
-            log(f"  {vid}: ошибка {e}")
-            continue
-        if not data:
-            continue
-        if data.get("hasTimestamps"):
-            lines = []
-            for l in data["lyrics"]:
-                text = l["text"] if isinstance(l, dict) else l.text
-                start = l["start_time"] if isinstance(l, dict) else l.start_time
-                lines.append((int(start), text))
-            log(f"  YT Music: синхронный текст ({vid})")
-            return lines, "\n".join(t for _, t in lines)
-        if plain_fallback is None and data.get("lyrics"):
-            plain_fallback = (None, data["lyrics"])
+    res = try_ids(ids)
+    if res:
+        return res
     if plain_fallback:
         log("  YT Music: только обычный текст")
     return plain_fallback
