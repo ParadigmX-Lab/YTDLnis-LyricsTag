@@ -2,11 +2,11 @@
 
 [Русский](README.md) | **English**
 
-Documentation v1.2 (lyrics_tag.py v5, plugin lyrics_tag_pp.py v3)
+Documentation v1.3 (lyrics_tag.py v5, plugin lyrics_tag_pp.py v3)
 
 Automatically embeds **synchronized lyrics** (karaoke-style, line by line) into the tags of downloaded tracks. It runs entirely on Android, no PC needed: once YTDLnis has downloaded a track, the lyrics are already inside the file, and your player shows them as the song plays.
 
-Tested with Poweramp and the opus format.
+Tested with Poweramp. The opus and mp3 (320 kbps) formats are verified on a device: lyrics, tags, cover art and sorting into folders all work.
 
 It works together with [YTDLnis](https://github.com/deniscerri/ytdlnis) (an Android front end for yt-dlp) and requires neither a PC nor root.
 
@@ -36,7 +36,7 @@ If a file already contains lyrics, it is skipped (to overwrite, use `force=1` or
 - A file manager
 - A player that can read embedded LRC lyrics (Poweramp is tested)
 
-Tested with: YTDLnis with bundled yt-dlp 2026.08.19, Python 3.14, ytmusicapi 1.12.3.
+Tested with: YTDLnis 1.9.1.1 (arm64) with bundled yt-dlp 2026.08.19, Python 3.14, ytmusicapi 1.12.3.
 
 ## Project structure
 
@@ -120,6 +120,18 @@ At the end of the log:
 The plugin's own messages are in Russian: "синхронный текст" means "synchronized lyrics" and "записано" means "written".
 
 If the log shows garbled characters instead of Cyrillic (`Ð·Ð°Ð¿Ð¸ÑÐ°Ð½Ð¾`), that is only a display issue of the log viewer; the files and tags are fine.
+
+## mp3 and quality
+
+YouTube serves only Opus and AAC; it has no ready-made mp3. When the mp3 container is selected in YTDLnis, the app downloads the original stream and converts it with ffmpeg (`--audio-format mp3`). The conversion happens before the plugin runs, so the plugin receives a finished mp3 and writes the lyrics into it (`SYLT` + `USLT`). Tags and cover art are preserved.
+
+The mp3 bitrate is set separately. On the download card, in the "Audio settings" block, there is a "Bitrate" button (the row of buttons may be cut off on the right, so scroll it). Choose 320 kbps. If you leave the default, YTDLnis does not pass `--audio-quality`, and ffmpeg encodes the mp3 at its own default bitrate. Judging by the file size this is about 128 kbps, and the sound is noticeably worse than the original Opus.
+
+You can set the same thing with a command in the template (`--audio-quality 0` gives VBR V0, about 245 kbps; `--audio-quality 320K` gives CBR 320).
+
+Opus to mp3 is a lossy-to-lossy re-encode, so even a 320 kbps mp3 is not better than the source, and the file is larger (on the verified track 11.0 MB versus 8.8 MB for opus). Choose mp3 only if your player or device cannot read opus.
+
+Verified on a device (YTDLnis 1.9.1.1): mp3 at 320 kbps CBR, 48 kHz, one `SYLT` (synchronized lyrics) and one `USLT` (plain), cover art and tags in place, sorting into folders works. Minor things you may notice are not caused by the plugin: a `COMM:ID3v1 Comment` with a truncated link (ID3v1 is limited to 30 bytes and yt-dlp writes it) and empty track and disc numbers (yt-dlp does not supply them).
 
 ## Plugin options
 
@@ -213,6 +225,9 @@ YouTube Music returns not only the performers but also songwriters and producers
 
 The first option cuts the artist down to the first name (which ends up in the file name), the second copies it into the `artist` tag. Tested on a single track with YTDLnis and yt-dlp 2026.08.19. Side effect: genuine collaborations (`A, B`) also become `A`, and `Tyler, The Creator` becomes `Tyler`.
 
+**The mp3 sounds bad**
+Most likely no bitrate was selected, so ffmpeg encodes the mp3 at about 128 kbps. Use the "Bitrate" button and pick 320 kbps (see "mp3 and quality").
+
 **No `[LyricsTag]` lines in the log**
 The plugin was not picked up. Check the `Post-Processor Plugins:` line in the log and the folder structure (see "Project structure"). Common causes: a wrong path in `--plugin-dirs`, or a stray `__init__.py`.
 
@@ -222,7 +237,7 @@ That message means "lyrics already present, skipping": the file already contains
 ## Limitations
 
 - `ytmusicapi` uses an unofficial, internal YouTube Music API and may stop working if Google changes it.
-- Tested on one device and one YTDLnis version, with the opus format. Writing to mp3, m4a and flac is implemented and was verified only on test files on a PC, not on a device with real tracks.
+- Tested on one device and one YTDLnis version, with the opus and mp3 formats. Writing to m4a and flac is implemented and was verified only on test files on a PC, not on a device with real tracks.
 - There is no guarantee that every track has synchronized lyrics.
 - Song lyrics belong to their rights holders. The script only writes what YouTube Music and LRCLIB return into the tags of your own personal files; it does not store or distribute lyrics anywhere.
 - This project is not affiliated with YouTube, Google, YTDLnis, yt-dlp or LRCLIB.
