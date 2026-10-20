@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-lyrics_tag.py (v6) - добавляет текст песни (синхронный или обычный) в теги mp3/opus/ogg/flac/m4a
+lyrics_tag.py (v7) - добавляет текст песни (синхронный или обычный) в теги mp3/opus/ogg/flac/m4a
 и (по желанию) раскладывает треки по папкам основного исполнителя.
 
 Источники по порядку:
@@ -19,6 +19,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import sys
 import time
 import traceback
@@ -37,7 +38,7 @@ from mutagen.id3 import ID3, ID3NoHeaderError, SYLT, USLT
 EXTS = {".mp3", ".opus", ".ogg", ".flac", ".m4a"}
 ID_RE = re.compile(r"(?:v=|youtu\.be/|/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])")
 NAME_ID_RE = re.compile(r"\[([A-Za-z0-9_-]{11})\]")
-UA = "LyricsTag/6 (https://github.com/ParadigmX-Lab/YTDLnis-LyricsTag)"  # LRCLIB просит указывать проект
+UA = "LyricsTag/7 (https://github.com/ParadigmX-Lab/YTDLnis-LyricsTag)"  # LRCLIB просит указывать проект
 LRC_RE = re.compile(r"^\[(\d+):(\d+(?:\.\d+)?)\](.*)$")
 ARTIST_SPLIT_RE = re.compile(r"\s*(?:,|;|\sfeat\.?\s|\sft\.?\s|\sfeaturing\s)\s*", re.I)
 BAD_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -211,15 +212,27 @@ def from_ytmusic(info, log):
     return plain_fallback
 
 
+def _ssl_context():
+    """Контекст TLS с CA-списком certifi.
+    Python в YTDLnis (Android) не находит системное хранилище сертификатов, и urllib падает с
+    CERTIFICATE_VERIFY_FAILED; certifi (он есть в окружении yt-dlp) решает это без отключения проверки."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:  # noqa: BLE001  (нет certifi - используем стандартное поведение)
+        return None
+
+
 def from_lrclib(info, log):
     params = {"artist_name": info["artist"], "track_name": info["title"],
               "duration": int(round(info["duration"]))}
     url = "https://lrclib.net/api/get?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     d = None
+    ctx = _ssl_context()
     for attempt in range(3):  # LRCLIB иногда отвечает 5xx, пробуем еще раз
         try:
-            with urllib.request.urlopen(req, timeout=15) as r:
+            with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
                 d = json.load(r)
             break
         except urllib.error.HTTPError as e:
@@ -228,6 +241,9 @@ def from_lrclib(info, log):
                 return None
             log(f"  LRCLIB: {e} (попытка {attempt + 1}/3)")
         except Exception as e:  # noqa: BLE001
+            if isinstance(getattr(e, "reason", e), ssl.SSLError):  # повторы не помогут
+                log(f"  LRCLIB: ошибка проверки сертификата, источник пропущен: {e}")
+                return None
             log(f"  LRCLIB: {type(e).__name__}: {e} (попытка {attempt + 1}/3)")
         if attempt < 2:
             time.sleep(2 * (attempt + 1))

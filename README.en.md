@@ -2,7 +2,7 @@
 
 [Русский](README.md) | **English**
 
-Documentation v1.4 (lyrics_tag.py v6, plugin lyrics_tag_pp.py v3)
+Documentation v1.5 (lyrics_tag.py v7, plugin lyrics_tag_pp.py v3)
 
 Automatically embeds **synchronized lyrics** (karaoke-style, line by line) into the tags of downloaded tracks. It runs entirely on Android, no PC needed: once YTDLnis has downloaded a track, the lyrics are already inside the file, and your player shows them as the song plays.
 
@@ -17,7 +17,7 @@ It works together with [YTDLnis](https://github.com/deniscerri/ytdlnis) (an Andr
 3. The plugin runs `lyrics_tag.py` inside the yt-dlp process itself (no shell, no subprocess).
 4. The script fetches lyrics from:
    - **YouTube Music** via the `ytmusicapi` library (the primary source; it first uses the videoId from the `purl` tag or from an `[id]` in the file name; if that id has no synchronized lyrics or is unknown, it runs a search, whose results are checked against the title and artist);
-   - **LRCLIB** (the fallback, used only if YouTube Music has no synchronized lyrics or could not be queried).
+   - **LRCLIB** (the fallback, used only if YouTube Music has no synchronized lyrics, is unavailable, or is disabled with `--no-yt`).
 5. The lyrics are written into the file's tags.
 
 Where the lyrics are stored:
@@ -216,6 +216,9 @@ The fallback service is temporarily unavailable. The script retries up to 3 time
 **`LRCLIB: трек не найден (404)` and `текст не найден` in the log**
 These mean "track not found" and "lyrics not found": neither YouTube Music nor LRCLIB has lyrics for this track. This happens with lesser-known tracks.
 
+**`поиск: пропущен ...` lines in the log**
+These mean "search: skipped" and are not errors. The YouTube Music search runs when the videoId from the tag yields no lyrics (or no id is known), and it also returns covers and other recordings with the same title. The script checks the title and artist and rejects such results; each rejected one is logged as "пропущен" (skipped).
+
 **Extra names in the file name and the artist tag (for example, `Artist, Songwriter Name - song.opus`)**
 YouTube Music returns not only the performers but also songwriters and producers in its artist list, and YTDLnis joins the whole list with commas. The plugin is not involved. To keep only the first name, add two yt-dlp options to the command template before `--use-postprocessor`:
 
@@ -224,6 +227,9 @@ YouTube Music returns not only the performers but also songwriters and producers
 ```
 
 The first option cuts the artist down to the first name (which ends up in the file name), the second copies it into the `artist` tag. Tested on a single track with YTDLnis and yt-dlp 2026.08.19. Side effect: genuine collaborations (`A, B`) also become `A`, and `Tyler, The Creator` becomes `Tyler`.
+
+**`LRCLIB: ... CERTIFICATE_VERIFY_FAILED` in the log**
+This happened in versions before v7: the Python inside YTDLnis cannot find the Android system certificates, so the request to the LRCLIB fallback fails TLS verification. In v7 the script uses the certificate list from `certifi` (it is part of the yt-dlp environment) and TLS verification stays enabled. If the error persists, the log shows a single line ("ошибка проверки сертификата, источник пропущен", meaning "certificate check failed, source skipped") instead of three retries.
 
 **The mp3 sounds bad**
 Most likely no bitrate was selected, so ffmpeg encodes the mp3 at about 128 kbps. Use the "Bitrate" button and pick 320 kbps (see "mp3 and quality").
@@ -238,6 +244,7 @@ That message means "lyrics already present, skipping": the file already contains
 
 - `ytmusicapi` uses an unofficial, internal YouTube Music API and may stop working if Google changes it.
 - Tested on one device and one YTDLnis version, with the opus and mp3 formats. Writing to m4a and flac is implemented and was verified only on test files on a PC, not on a device with real tracks.
+- The LRCLIB fallback has been verified on a device only for connectivity (503 and 404 responses); getting lyrics from it for a real track on a device is not confirmed.
 - There is no guarantee that every track has synchronized lyrics.
 - Song lyrics belong to their rights holders. The script only writes what YouTube Music and LRCLIB return into the tags of your own personal files; it does not store or distribute lyrics anywhere.
 - This project is not affiliated with YouTube, Google, YTDLnis, yt-dlp or LRCLIB.
