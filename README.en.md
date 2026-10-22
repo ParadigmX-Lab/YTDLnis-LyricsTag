@@ -2,7 +2,7 @@
 
 [Русский](README.md) | **English**
 
-Documentation v1.5 (lyrics_tag.py v7, plugin lyrics_tag_pp.py v3)
+Documentation v1.6 (lyrics_tag.py v8, plugin lyrics_tag_pp.py v4)
 
 Automatically embeds **synchronized lyrics** (karaoke-style, line by line) into the tags of downloaded tracks. It runs entirely on Android, no PC needed: once YTDLnis has downloaded a track, the lyrics are already inside the file, and your player shows them as the song plays.
 
@@ -149,6 +149,8 @@ Options are appended after `when=after_move`, separated by `;`:
 | `sort=1` | after writing the lyrics, move the track into a subfolder named after the main artist (see the section below) |
 | `script=/path/to/lyrics_tag.py` | use the script from a different location |
 
+An option is enabled by `1`, `true`, `yes` or `on`. An unknown option (for example, the typo `sotr=1`) does not break the download: it is ignored, and the log shows `WARNING: неизвестные параметры игнорируются: ...` ("unknown options are ignored").
+
 ## Manual run (for tracks you already have)
 
 In the YTDLnis terminal ("More" - "Terminal"):
@@ -238,7 +240,7 @@ Most likely no bitrate was selected, so ffmpeg encodes the mp3 at about 128 kbps
 The plugin was not picked up. Check the `Post-Processor Plugins:` line in the log and the folder structure (see "Project structure"). Common causes: a wrong path in `--plugin-dirs`, or a stray `__init__.py`.
 
 **No lyrics appeared, and the log says "уже есть текст, пропуск"**
-That message means "lyrics already present, skipping": the file already contains lyrics. Use `force=1`.
+That message means "lyrics already present, skipping": the file already contains lyrics. Use `force=1`. If it happens right after a download, check whether the built-in YTDLnis "Lyrics" option (in the audio settings) is enabled: its postprocessor runs before LyricsTag and writes its own lyrics first. Turn it off, or add `force=1` so LyricsTag writes lyrics from its own sources.
 
 ## Limitations
 

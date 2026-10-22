@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-lyrics_tag.py (v7) - добавляет текст песни (синхронный или обычный) в теги mp3/opus/ogg/flac/m4a
+lyrics_tag.py (v8) - добавляет текст песни (синхронный или обычный) в теги mp3/opus/ogg/flac/m4a
 и (по желанию) раскладывает треки по папкам основного исполнителя.
 
 Источники по порядку:
@@ -38,10 +38,12 @@ from mutagen.id3 import ID3, ID3NoHeaderError, SYLT, USLT
 EXTS = {".mp3", ".opus", ".ogg", ".flac", ".m4a"}
 ID_RE = re.compile(r"(?:v=|youtu\.be/|/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])")
 NAME_ID_RE = re.compile(r"\[([A-Za-z0-9_-]{11})\]")
-UA = "LyricsTag/7 (https://github.com/ParadigmX-Lab/YTDLnis-LyricsTag)"  # LRCLIB просит указывать проект
+UA = "LyricsTag/8 (https://github.com/ParadigmX-Lab/YTDLnis-LyricsTag)"  # LRCLIB просит указывать проект
 LRC_RE = re.compile(r"^\[(\d+):(\d+(?:\.\d+)?)\](.*)$")
 ARTIST_SPLIT_RE = re.compile(r"\s*(?:,|;|\sfeat\.?\s|\sft\.?\s|\sfeaturing\s)\s*", re.I)
 BAD_CHARS_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+# апострофы: укр. "ʼ" (U+02BC) Python считает буквой, а "'" и "’" - нет; убираем все одинаково
+APOS_RE = re.compile("[\u02bc\u02b9\u2019\u2018'`\u00b4]")
 
 
 # ---------- чтение метаданных файла ----------
@@ -50,6 +52,12 @@ def first(v):
     if isinstance(v, (list, tuple)):
         return str(v[0]) if v else ""
     return str(v) if v is not None else ""
+
+
+def _id3_text(t, key):
+    """Первое значение текстового кадра ID3 (str(frame) склеивает несколько значений через \\x00)."""
+    fr = t.get(key)
+    return str(fr.text[0]) if fr is not None and getattr(fr, "text", None) else ""
 
 
 def read_info(path):
@@ -66,8 +74,8 @@ def read_info(path):
             t = ID3(path)
         except ID3NoHeaderError:
             t = ID3()
-        info["artist"] = first(t.get("TPE1")) if t.get("TPE1") else ""
-        info["title"] = first(t.get("TIT2")) if t.get("TIT2") else ""
+        info["artist"] = _id3_text(t, "TPE1")
+        info["title"] = _id3_text(t, "TIT2")
         info["has_lyrics"] = bool(t.getall("USLT") or t.getall("SYLT"))
         for key in t.keys():
             if key.startswith("TXXX:purl") or key.startswith("COMM") or key.startswith("WXXX"):
@@ -111,7 +119,8 @@ def parse_lrc(lrc):
 
 
 def _norm(s):
-    s = re.sub(r"[(\[].*?[)\]]", " ", s or "")  # убрать (feat. ...), [Remix] и т.п.
+    s = APOS_RE.sub("", s or "")
+    s = re.sub(r"[(\[].*?[)\]]", " ", s)  # убрать (feat. ...), [Remix] и т.п.
     return re.sub(r"[\W_]+", "", s.casefold())
 
 
@@ -128,7 +137,11 @@ def _same_track(info, r):
                for w in wanted for h in have)
 
 
+_YT = None  # один экземпляр на процесс: иначе на каждый трек новый visitor id (лишний запрос к music.youtube.com)
+
+
 def from_ytmusic(info, log):
+    global _YT
     try:
         from ytmusicapi import YTMusic
     except Exception as e:  # noqa: BLE001  (ImportError и любые ошибки при импорте)
@@ -138,7 +151,9 @@ def from_ytmusic(info, log):
         for tb_line in traceback.format_exc().splitlines()[-8:]:
             log("  " + tb_line)
         return None
-    yt = YTMusic()
+    if _YT is None:
+        _YT = YTMusic()
+    yt = _YT
     tried = set()
     plain_fallback = None
 
@@ -160,10 +175,13 @@ def from_ytmusic(info, log):
                 text = l["text"] if isinstance(l, dict) else l.text
                 start = l["start_time"] if isinstance(l, dict) else l.start_time
                 lines.append((int(start), text))
+            if not any((t or "").strip() for _, t in lines):
+                return None  # пустой синхронный текст
             log(f"  YT Music: синхронный текст ({vid})")
             return lines, "\n".join(t for _, t in lines)
-        if data.get("lyrics"):
-            return None, data["lyrics"]
+        plain = data.get("lyrics")
+        if isinstance(plain, str) and plain.strip():
+            return None, plain
         return None
 
     def try_ids(ids):
@@ -239,9 +257,12 @@ def from_lrclib(info, log):
             if e.code == 404:
                 log("  LRCLIB: трек не найден (404)")
                 return None
+            if e.code < 500 and e.code != 429:  # 400/403 и т.п. повтор не исправит
+                log(f"  LRCLIB: {e}, источник пропущен")
+                return None
             log(f"  LRCLIB: {e} (попытка {attempt + 1}/3)")
         except Exception as e:  # noqa: BLE001
-            if isinstance(getattr(e, "reason", e), ssl.SSLError):  # повторы не помогут
+            if isinstance(getattr(e, "reason", e), ssl.SSLCertVerificationError):  # повторы не помогут
                 log(f"  LRCLIB: ошибка проверки сертификата, источник пропущен: {e}")
                 return None
             log(f"  LRCLIB: {type(e).__name__}: {e} (попытка {attempt + 1}/3)")
@@ -254,10 +275,10 @@ def from_lrclib(info, log):
         return None
     if d.get("syncedLyrics"):
         lines = parse_lrc(d["syncedLyrics"])
-        if lines:
+        if any(t for _, t in lines):
             log("  LRCLIB: синхронный текст")
             return lines, "\n".join(t for _, t in lines)
-    if d.get("plainLyrics"):
+    if (d.get("plainLyrics") or "").strip():
         log("  LRCLIB: только обычный текст")
         return None, d["plainLyrics"]
     return None
