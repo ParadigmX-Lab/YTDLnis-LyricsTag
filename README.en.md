@@ -131,7 +131,7 @@ You can set the same thing with a command in the template (`--audio-quality 0` g
 
 Opus to mp3 is a lossy-to-lossy re-encode, so even a 320 kbps mp3 is not better than the source, and the file is larger (on the verified track 11.0 MB versus 8.8 MB for opus). Choose mp3 only if your player or device cannot read opus.
 
-Verified on a device (YTDLnis 1.9.1.1): mp3 at 320 kbps CBR, 48 kHz, one `SYLT` (synchronized lyrics) and one `USLT` (plain), cover art and tags in place, sorting into folders works. Minor things you may notice are not caused by the plugin: a `COMM:ID3v1 Comment` with a truncated link (ID3v1 is limited to 30 bytes and yt-dlp writes it) and empty track and disc numbers (yt-dlp does not supply them).
+Verified on a device (YTDLnis 1.9.1.1): mp3 at 320 kbps CBR, 48 kHz, one `SYLT` (synchronized lyrics) and one `USLT` (plain), cover art and tags in place, sorting into folders works. The comment with the link: yt-dlp writes it to `TXXX:comment` and to the old ID3v1 tag, whose field is limited to 30 bytes, so players used to show a truncated link (`https://www.youtube.com/watch?`). Since v8 LyricsTag removes the truncated copy and adds a regular comment (`COMM`) with the full link, also for mp3 files where lyrics were not found or were already present (this also repairs files processed by older versions: just run the folder manually). Empty track and disc numbers are not caused by the plugin: yt-dlp does not supply them.
 
 ## Plugin options
 

@@ -33,7 +33,7 @@ if os.path.isdir(_LIBS) and _LIBS not in sys.path:
     sys.path.append(_LIBS)
 
 import mutagen
-from mutagen.id3 import ID3, ID3NoHeaderError, SYLT, USLT
+from mutagen.id3 import COMM, ID3, ID3NoHeaderError, SYLT, USLT
 
 EXTS = {".mp3", ".opus", ".ogg", ".flac", ".m4a"}
 ID_RE = re.compile(r"(?:v=|youtu\.be/|/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])")
@@ -295,14 +295,44 @@ def to_lrc(lines):
     return "\n".join(out)
 
 
+def _fix_comment(t):
+    """mp3: yt-dlp кладёт ссылку в TXXX:comment (ID3v2) и в ID3v1, где поле обрезано до 30 байт.
+    Плееры показывают обрезанную. Убираем копию из ID3v1 (mutagen называет её "ID3v1 Comment")
+    и добавляем обычный COMM с полной ссылкой. Возвращает True, если тег изменён."""
+    changed = False
+    for key in [k for k in t.keys() if k.startswith("COMM:ID3v1 Comment")]:
+        del t[key]
+        changed = True
+    if not t.getall("COMM"):
+        src = t.get("TXXX:comment") or t.get("TXXX:purl")
+        text = first(getattr(src, "text", None))
+        if text:
+            t.add(COMM(encoding=3, lang="eng", desc="", text=text))
+            changed = True
+    return changed
+
+
+def fix_mp3_comment(path):
+    """То же для mp3, в который текст не записывался (текст не найден или уже был)."""
+    try:
+        t = ID3(path, load_v1=False)
+    except ID3NoHeaderError:
+        return False
+    if _fix_comment(t):
+        t.save(path, v2_version=3)
+        return True
+    return False
+
+
 def write_tags(path, lines, plain, lrc_in_uslt):
     ext = os.path.splitext(path)[1].lower()
     lrc = to_lrc(lines) if lines else None
     if ext == ".mp3":
         try:
-            t = ID3(path)
+            t = ID3(path, load_v1=False)  # без ID3v1: иначе его обрезанные поля переедут в ID3v2
         except ID3NoHeaderError:
             t = ID3()
+        _fix_comment(t)
         t.delall("USLT")
         t.delall("SYLT")
         t.add(USLT(encoding=3, lang="XXX", desc="", text=lrc if (lrc and lrc_in_uslt) else plain))
@@ -390,6 +420,11 @@ def process(path, args, log, root=None):
         log(f"{os.path.basename(path)}")
     else:
         wrote = add_lyrics(path, args, log)
+        if not wrote and path.lower().endswith(".mp3"):
+            try:
+                fix_mp3_comment(path)
+            except Exception as e:  # noqa: BLE001  (не мешать сортировке)
+                log(f"  комментарий: не удалось исправить: {e}")
     new_path = path
     if sort_only or getattr(args, "sort", False):
         new_path = sort_into_artist_dir(path, root or os.path.dirname(os.path.abspath(path)), log)
